@@ -3,7 +3,7 @@ package manifestival
 import (
 	"context"
 	"fmt"
-
+    "net/http"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -40,6 +40,15 @@ var _ Manifestival = &Manifest{}
 func NewManifest(pathname string, recursive bool, client client.Client) (Manifest, error) {
 	log.Info("Reading file", "name", pathname)
 	resources, err := Parse(pathname, recursive)
+	if err != nil {
+		return Manifest{}, err
+	}
+	return Manifest{Resources: resources, client: client}, nil
+}
+
+func NewManifestHTTPFileSystem(httpfs http.FileSystem, pathname string, recursive bool, client client.Client) (Manifest, error) {
+	log.Info("Reading file", "name", pathname, "from HTTP FileSystem")
+	resources, err := ParseHTTPFileSystem(httpfs, pathname, recursive)
 	if err != nil {
 		return Manifest{}, err
 	}

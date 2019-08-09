@@ -39,6 +39,26 @@ func Parse(pathname string, recursive bool) ([]unstructured.Unstructured, error)
 	return aggregated, nil
 }
 
+// Parse parses YAML files into Unstructured objects from an http.FileSystem
+//
+// Case
+// 1. pathname = path to a file --> parses that file.
+// 2. pathname = string can contain multiple file records separated by comma
+func ParseHTTPFileSystem(httpfs http.FileSystem, pathname string, recursive bool) ([]unstructured.Unstructured, error) {
+
+	pathnames := strings.Split(pathname, ",")
+	aggregated := []unstructured.Unstructured{}
+	for _, pth := range pathnames {
+		els, err := readHTTPFileSystem(httpfs, pth, recursive)
+		if err != nil {
+			return nil, err
+		}
+
+		aggregated = append(aggregated, els...)
+	}
+	return aggregated, nil
+}
+
 // read cotains a logic to distinguish the type of record in pathname
 // (file, directory or url) and calls the appropriate function
 func read(pathname string, recursive bool) ([]unstructured.Unstructured, error) {
@@ -57,6 +77,26 @@ func read(pathname string, recursive bool) ([]unstructured.Unstructured, error) 
 	return readFile(pathname)
 }
 
+// readFileHTTPFileSystem parses a single file from an http.FileSystem
+func readHTTPFileSystem(httpfs http.FileSystem, pathname string, recursive bool) ([]unstructured.Unstructured, error) {
+	file, err := httpfs.Open(pathname)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	
+	if info.IsDir() {
+		return readDirHTTPFileSystem(httpfs, pathname, recursive)
+	}	
+
+	return readFileHTTPFileSystem(httpfs, pathname)
+}
+
 // readFile parses a single file.
 func readFile(pathname string) ([]unstructured.Unstructured, error) {
 	file, err := os.Open(pathname)
@@ -65,6 +105,17 @@ func readFile(pathname string) ([]unstructured.Unstructured, error) {
 	}
 	defer file.Close()
 
+	return decode(file)
+}
+
+// readFile parses a single http.FileSystem file.
+func readFileHTTPFileSystem(httpfs http.FileSystem, pathname string) ([]unstructured.Unstructured, error) {
+	file, err := httpfs.Open(pathname)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	
 	return decode(file)
 }
 
@@ -86,6 +137,40 @@ func readDir(pathname string, recursive bool) ([]unstructured.Unstructured, erro
 			els, err = readDir(name, recursive)
 		case !f.IsDir():
 			els, err = readFile(name)
+		}
+
+		if err != nil {
+			return nil, err
+		}
+		aggregated = append(aggregated, els...)
+	}
+	return aggregated, nil
+}
+
+// readDirHTTPFileSystem parses all files in a single directory and it's descendant directories
+// if the recursive flag is set to true.
+func readDirHTTPFileSystem(httpfs http.FileSystem, pathname string, recursive bool) ([]unstructured.Unstructured, error) {
+	file, err := httpfs.Open(pathname)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	
+	list, err := file.Readdir(-1)
+	if err != nil {
+		return nil, err
+	}
+
+	aggregated := []unstructured.Unstructured{}
+	for _, f := range list {
+		name := path.Join(pathname, f.Name())
+		var els []unstructured.Unstructured
+
+		switch {
+		case f.IsDir() && recursive:
+			els, err = readDirHTTPFileSystem(httpfs, name, recursive)
+		case !f.IsDir():
+			els, err = readFileHTTPFileSystem(httpfs, name)
 		}
 
 		if err != nil {
